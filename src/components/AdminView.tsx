@@ -14,9 +14,12 @@ import {
   Pencil,
   Trash2,
   X,
+  Building2,
+  Bookmark,
 } from 'lucide-react'
 import { api } from '../api'
-import type { Course, SessionAttendanceItem, SessionQR, SessionResponse, Student } from '../types'
+import type { ClassroomLocation, Course, SessionAttendanceItem, SessionQR, SessionResponse, Student } from '../types'
+import { MiniMapPicker } from './MiniMapPicker'
 
 export function AdminView() {
   // Auth state
@@ -30,6 +33,7 @@ export function AdminView() {
   // Data state
   const [courses, setCourses] = useState<Course[]>([])
   const [students, setStudents] = useState<Student[]>([])
+  const [locations, setLocations] = useState<ClassroomLocation[]>([])
   const [selectedScheduleFilter, setSelectedScheduleFilter] = useState<'all' | 'weekday' | 'weekend'>('all')
   const [selectedStudentClassFilter, setSelectedStudentClassFilter] = useState<number | 'all'>('all')
 
@@ -60,13 +64,28 @@ export function AdminView() {
   const [editStudentCourseId, setEditStudentCourseId] = useState<number | ''>('')
   const [editStudentSaving, setEditStudentSaving] = useState(false)
 
-  // Session Form
+  // Session Form (Location mode: specific vs manual)
   const [selectedCourseId, setSelectedCourseId] = useState<number | ''>('')
+  const [selectedLocationId, setSelectedLocationId] = useState<number | 'manual'>('manual')
   const [latitude, setLatitude] = useState<number>(13.7563)
   const [longitude, setLongitude] = useState<number>(100.5018)
   const [radiusM, setRadiusM] = useState<number>(100)
   const [durationMinutes, setDurationMinutes] = useState<number>(15)
   const [geoLocating, setGeoLocating] = useState(false)
+
+  // Save spot modal state
+  const [isSaveSpotModalOpen, setIsSaveSpotModalOpen] = useState(false)
+  const [newSpotName, setNewSpotName] = useState('')
+  const [newSpotSaving, setNewSpotSaving] = useState(false)
+
+  // Manage Locations modal state
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
+  const [editingLocation, setEditingLocation] = useState<ClassroomLocation | null>(null)
+  const [editLocName, setEditLocName] = useState('')
+  const [editLocLat, setEditLocLat] = useState<number>(0)
+  const [editLocLng, setEditLocLng] = useState<number>(0)
+  const [editLocRadius, setEditLocRadius] = useState<number>(100)
+  const [editLocSaving, setEditLocSaving] = useState(false)
 
   // Active Session state
   const [activeSession, setActiveSession] = useState<SessionResponse | null>(null)
@@ -123,9 +142,14 @@ export function AdminView() {
   const loadInitialData = async () => {
     setLoading(true)
     try {
-      const [cList, sList] = await Promise.all([api.getCourses(), api.getStudents()])
+      const [cList, sList, lList] = await Promise.all([
+        api.getCourses(),
+        api.getStudents(),
+        api.getLocations(),
+      ])
       setCourses(cList)
       setStudents(sList)
+      setLocations(lList)
       if (cList.length > 0) {
         if (selectedCourseId === '') setSelectedCourseId(cList[0].id)
         if (newStudentCourseId === '') setNewStudentCourseId(cList[0].id)
@@ -161,6 +185,7 @@ export function AdminView() {
       (pos) => {
         setLatitude(Number(pos.coords.latitude.toFixed(6)))
         setLongitude(Number(pos.coords.longitude.toFixed(6)))
+        setSelectedLocationId('manual')
         setGeoLocating(false)
         setMessage({ type: 'success', text: `GPS acquired (Accuracy: ±${Math.round(pos.coords.accuracy)}m)` })
       },
@@ -170,6 +195,108 @@ export function AdminView() {
       },
       { enableHighAccuracy: true, timeout: 10000 }
     )
+  }
+
+  // Handle location selection
+  const handleSelectLocation = (val: string) => {
+    if (val === 'manual') {
+      setSelectedLocationId('manual')
+      return
+    }
+    const locId = Number(val)
+    setSelectedLocationId(locId)
+    const found = locations.find((l) => l.id === locId)
+    if (found) {
+      setLatitude(found.latitude)
+      setLongitude(found.longitude)
+      setRadiusM(found.default_radius_m)
+      setMessage({ type: 'success', text: `Selected location: "${found.name}"` })
+    }
+  }
+
+  // Map coordinate change (pin drag or map click)
+  const handleMapCoordinateChange = (lat: number, lng: number) => {
+    setLatitude(lat)
+    setLongitude(lng)
+    // If coordinates were moved, switch to manual mode
+    if (selectedLocationId !== 'manual') {
+      setSelectedLocationId('manual')
+    }
+  }
+
+  // Save current pin as new specific location
+  const handleSaveSpot = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newSpotName.trim()) return
+    setNewSpotSaving(true)
+    try {
+      const created = await api.createLocation({
+        name: newSpotName.trim(),
+        latitude,
+        longitude,
+        default_radius_m: radiusM,
+      })
+      setLocations((prev) => [...prev, created])
+      setSelectedLocationId(created.id)
+      setIsSaveSpotModalOpen(false)
+      setNewSpotName('')
+      setMessage({ type: 'success', text: `Location "${created.name}" saved successfully!` })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message })
+    } finally {
+      setNewSpotSaving(false)
+    }
+  }
+
+  // Open edit location modal
+  const handleOpenEditLocation = (loc: ClassroomLocation) => {
+    setEditingLocation(loc)
+    setEditLocName(loc.name)
+    setEditLocLat(loc.latitude)
+    setEditLocLng(loc.longitude)
+    setEditLocRadius(loc.default_radius_m)
+  }
+
+  // Save edit location
+  const handleSaveEditLocation = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingLocation) return
+    setEditLocSaving(true)
+    try {
+      const updated = await api.updateLocation(editingLocation.id, {
+        name: editLocName.trim(),
+        latitude: editLocLat,
+        longitude: editLocLng,
+        default_radius_m: editLocRadius,
+      })
+      setLocations((prev) => prev.map((l) => (l.id === updated.id ? updated : l)))
+      if (selectedLocationId === updated.id) {
+        setLatitude(updated.latitude)
+        setLongitude(updated.longitude)
+        setRadiusM(updated.default_radius_m)
+      }
+      setEditingLocation(null)
+      setMessage({ type: 'success', text: `Location "${updated.name}" updated!` })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message })
+    } finally {
+      setEditLocSaving(false)
+    }
+  }
+
+  // Delete location
+  const handleDeleteLocation = async (locId: number) => {
+    if (!window.confirm('Are you sure you want to delete this saved location?')) return
+    try {
+      await api.deleteLocation(locId)
+      setLocations((prev) => prev.filter((l) => l.id !== locId))
+      if (selectedLocationId === locId) {
+        setSelectedLocationId('manual')
+      }
+      setMessage({ type: 'success', text: 'Location deleted successfully.' })
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message })
+    }
   }
 
   // Create Course (Class)
@@ -216,7 +343,6 @@ export function AdminView() {
         schedule_type: editCourseSchedule,
       })
       setCourses((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
-      // Also update student list course codes
       setStudents((prev) =>
         prev.map((s) =>
           s.course_id === updated.id
@@ -507,8 +633,25 @@ export function AdminView() {
               </div>
             </div>
 
+            {/* Live Geofence Mini Map Preview */}
+            <div className="hidden md:block w-56 lg:w-64 rounded-2xl overflow-hidden border border-white/20 bg-slate-800 shadow-xl shrink-0">
+              <div className="px-3 py-1.5 bg-slate-900/80 text-[10px] font-semibold text-slate-300 flex items-center justify-between border-b border-white/10">
+                <span className="flex items-center gap-1">
+                  <MapPin className="h-3 w-3 text-indigo-400" /> Live Geofence
+                </span>
+                <span className="text-emerald-400 font-bold">±{activeSession.radius_m}m</span>
+              </div>
+              <MiniMapPicker
+                latitude={activeSession.latitude ?? latitude}
+                longitude={activeSession.longitude ?? longitude}
+                radiusM={activeSession.radius_m}
+                onChangeCoordinates={() => {}}
+                height="180px"
+              />
+            </div>
+
             {/* QR Code Presentation Box */}
-            <div className="flex flex-col items-center rounded-2xl bg-white p-6 shadow-xl text-slate-900">
+            <div className="flex flex-col items-center rounded-2xl bg-white p-6 shadow-xl text-slate-900 shrink-0">
               <div className="p-2 border-4 border-indigo-500/30 rounded-xl bg-white">
                 <QRCodeSVG value={activeQR.qr_token} size={230} level="H" includeMargin={true} />
               </div>
@@ -574,9 +717,72 @@ export function AdminView() {
               </select>
             </div>
 
+            {/* Location Selector (Specific Location vs Manual Mode) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-700">Classroom Location</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsSaveSpotModalOpen(true)}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-800"
+                    title="Save current pin & radius as a specific location"
+                  >
+                    <Bookmark className="h-3 w-3" />
+                    Save Spot
+                  </button>
+                  <span className="text-slate-300">•</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsLocationModalOpen(true)}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800"
+                  >
+                    <Building2 className="h-3 w-3" />
+                    Manage Locations ({locations.length})
+                  </button>
+                </div>
+              </div>
+
+              <select
+                value={selectedLocationId}
+                onChange={(e) => handleSelectLocation(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 p-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+              >
+                <option value="manual">📍 Custom / Manual Pin (Freely pick on map)</option>
+                {locations.length > 0 && (
+                  <optgroup label="Saved Specific Locations">
+                    {locations.map((loc) => (
+                      <option key={loc.id} value={loc.id}>
+                        🏢 {loc.name} (±{loc.default_radius_m}m)
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+
+              {selectedLocationId === 'manual' ? (
+                <div className="flex items-center justify-between text-[11px] text-amber-700 bg-amber-50/70 border border-amber-200/60 rounded-lg px-2.5 py-1">
+                  <span>Manual mode: Drag map pin or type coordinates</span>
+                  <span className="font-semibold text-[10px] bg-amber-200/70 px-1.5 py-0.2 rounded">Manual GPS</span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1">
+                  <span>Using saved location coordinates</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLocationId('manual')}
+                    className="font-semibold underline text-[10px]"
+                  >
+                    Switch to Manual
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Interactive Mini Map & Estimated Radius */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="block text-xs font-semibold text-slate-700">Classroom GPS Location</label>
+                <span className="text-[11px] font-semibold text-slate-600">Geofence Map</span>
                 <button
                   type="button"
                   onClick={getCurrentLocation}
@@ -587,53 +793,57 @@ export function AdminView() {
                   {geoLocating ? 'Acquiring...' : 'Use My GPS'}
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+
+              {/* Leaflet Mini Map Picker */}
+              <MiniMapPicker
+                latitude={latitude}
+                longitude={longitude}
+                radiusM={radiusM}
+                onChangeCoordinates={handleMapCoordinateChange}
+                onChangeRadius={(r) => setRadiusM(r)}
+                height="190px"
+              />
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
                 <div>
-                  <span className="text-[10px] text-slate-500">Latitude</span>
+                  <span className="text-[10px] text-slate-500 font-medium">Latitude</span>
                   <input
                     type="number"
                     step="any"
                     value={latitude}
-                    onChange={(e) => setLatitude(parseFloat(e.target.value) || 0)}
-                    className="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    onChange={(e) => {
+                      setLatitude(parseFloat(e.target.value) || 0)
+                      setSelectedLocationId('manual')
+                    }}
+                    className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono text-slate-900 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500">Longitude</span>
+                  <span className="text-[10px] text-slate-500 font-medium">Longitude</span>
                   <input
                     type="number"
                     step="any"
                     value={longitude}
-                    onChange={(e) => setLongitude(parseFloat(e.target.value) || 0)}
-                    className="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                    onChange={(e) => {
+                      setLongitude(parseFloat(e.target.value) || 0)
+                      setSelectedLocationId('manual')
+                    }}
+                    className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono text-slate-900 focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Max Radius (m)</label>
-                <input
-                  type="number"
-                  min={10}
-                  max={2000}
-                  value={radiusM}
-                  onChange={(e) => setRadiusM(parseInt(e.target.value) || 100)}
-                  className="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Duration (mins)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={240}
-                  value={durationMinutes}
-                  onChange={(e) => setDurationMinutes(parseInt(e.target.value) || 15)}
-                  className="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Session Duration (minutes)</label>
+              <input
+                type="number"
+                min={1}
+                max={240}
+                value={durationMinutes}
+                onChange={(e) => setDurationMinutes(parseInt(e.target.value) || 15)}
+                className="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+              />
             </div>
 
             <button
@@ -907,6 +1117,204 @@ export function AdminView() {
           </form>
         </div>
       </div>
+
+      {/* Save Spot as New Location Modal */}
+      {isSaveSpotModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-2xs">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Bookmark className="h-4 w-4 text-emerald-600" />
+                <h3 className="font-bold text-slate-900">Save Location Preset</h3>
+              </div>
+              <button
+                onClick={() => setIsSaveSpotModalOpen(false)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSpot} className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Location Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Room 302, Science Hall"
+                  value={newSpotName}
+                  onChange={(e) => setNewSpotName(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 p-2.5 text-xs text-slate-900 focus:border-indigo-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="rounded-xl bg-slate-50 p-3 text-[11px] text-slate-600 font-mono space-y-0.5">
+                <p>Lat: {latitude.toFixed(6)}</p>
+                <p>Lng: {longitude.toFixed(6)}</p>
+                <p>Default Radius: ±{radiusM}m</p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsSaveSpotModalOpen(false)}
+                  className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={newSpotSaving || !newSpotName.trim()}
+                  className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition disabled:opacity-50"
+                >
+                  {newSpotSaving ? 'Saving...' : 'Save Specific Location'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Saved Locations Modal */}
+      {isLocationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-2xs">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-indigo-600" />
+                <h3 className="font-bold text-slate-900">Manage Saved Locations ({locations.length})</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setIsLocationModalOpen(false)
+                  setEditingLocation(null)
+                }}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* If editing an existing location */}
+            {editingLocation ? (
+              <form onSubmit={handleSaveEditLocation} className="mt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-indigo-900">Editing: {editingLocation.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setEditingLocation(null)}
+                    className="text-xs text-slate-500 underline"
+                  >
+                    Back to list
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Location Name</label>
+                  <input
+                    type="text"
+                    value={editLocName}
+                    onChange={(e) => setEditLocName(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 p-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-500 mb-0.5">Latitude</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={editLocLat}
+                      onChange={(e) => setEditLocLat(parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500 mb-0.5">Longitude</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={editLocLng}
+                      onChange={(e) => setEditLocLng(parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-500 mb-0.5">Radius (m)</label>
+                    <input
+                      type="number"
+                      value={editLocRadius}
+                      onChange={(e) => setEditLocRadius(parseInt(e.target.value) || 100)}
+                      className="w-full rounded-lg border border-slate-300 p-2 text-xs font-mono"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setEditingLocation(null)}
+                    className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={editLocSaving}
+                    className="rounded-xl bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {editLocSaving ? 'Saving...' : 'Update Location'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* Locations list */
+              <div className="mt-4 space-y-2 max-h-72 overflow-y-auto pr-1">
+                {locations.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">No saved locations found. Use "+ Save Spot" on the map.</p>
+                ) : (
+                  locations.map((loc) => (
+                    <div
+                      key={loc.id}
+                      className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-200/70 p-3 text-xs"
+                    >
+                      <div>
+                        <span className="font-bold text-slate-900">{loc.name}</span>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                          {loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)} • ±{loc.default_radius_m}m radius
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditLocation(loc)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-white"
+                          title="Edit Location"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLocation(loc.id)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-white"
+                          title="Delete Location"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Edit Course Dialog */}
       {editingCourse && (

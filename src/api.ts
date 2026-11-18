@@ -2,6 +2,7 @@ import type {
   AdminUser,
   AttendanceScan,
   AuthResponse,
+  ClassroomLocation,
   Course,
   ScanResult,
   SessionAttendanceItem,
@@ -151,6 +152,49 @@ export const api = {
 
   deleteStudent: (studentId: number): Promise<{ message: string }> =>
     fetch(`${BASE_URL}/students/${studentId}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeader() },
+    }).then((r) => handleResponse<{ message: string }>(r)),
+
+  // Specific Locations (Specific location & Manual mode)
+  getLocations: (): Promise<ClassroomLocation[]> =>
+    fetch(`${BASE_URL}/locations`).then((r) => handleResponse<ClassroomLocation[]>(r)),
+
+  createLocation: (data: {
+    name: string
+    latitude: number
+    longitude: number
+    default_radius_m: number
+  }): Promise<ClassroomLocation> =>
+    fetch(`${BASE_URL}/locations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(data),
+    }).then((r) => handleResponse<ClassroomLocation>(r)),
+
+  updateLocation: (
+    locationId: number,
+    data: {
+      name?: string
+      latitude?: number
+      longitude?: number
+      default_radius_m?: number
+    }
+  ): Promise<ClassroomLocation> =>
+    fetch(`${BASE_URL}/locations/${locationId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeader(),
+      },
+      body: JSON.stringify(data),
+    }).then((r) => handleResponse<ClassroomLocation>(r)),
+
+  deleteLocation: (locationId: number): Promise<{ message: string }> =>
+    fetch(`${BASE_URL}/locations/${locationId}`, {
       method: 'DELETE',
       headers: { ...getAuthHeader() },
     }).then((r) => handleResponse<{ message: string }>(r)),

@@ -16,6 +16,14 @@ export interface Course {
   schedule_type: 'weekday' | 'weekend';
 }
 
+export interface ClassroomLocation {
+  id: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  default_radius_m: number;
+}
+
 export interface Student {
   id: number;
   student_code: string;
@@ -40,6 +48,8 @@ export interface SessionResponse {
   starts_at: string;
   ends_at: string;
   radius_m: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface SessionQR {
