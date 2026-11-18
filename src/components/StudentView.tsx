@@ -30,10 +30,23 @@ export function StudentView() {
   const [history, setHistory] = useState<StudentAttendanceItem[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
 
+  const [classFilter, setClassFilter] = useState<number | 'all'>('all')
+  const [courses, setCourses] = useState<any[]>([])
+
   useEffect(() => {
     loadStudents()
+    loadCourses()
     acquireLocation()
   }, [])
+
+  const loadCourses = async () => {
+    try {
+      const list = await api.getCourses()
+      setCourses(list)
+    } catch {
+      // ignore
+    }
+  }
 
   const loadStudents = async () => {
     try {
@@ -161,19 +174,43 @@ export function StudentView() {
 
         <form onSubmit={handleSubmitAttendance} className="mt-6 space-y-5">
           {/* 1. Student Identity */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              1. Select Your Student Profile
-            </label>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                1. Select Your Student Profile
+              </label>
+              {courses.length > 0 && (
+                <select
+                  value={classFilter}
+                  onChange={(e) => {
+                    const val = e.target.value === 'all' ? 'all' : Number(e.target.value)
+                    setClassFilter(val)
+                    const filtered = val === 'all' ? students : students.filter((s) => s.course_id === val)
+                    if (filtered.length > 0) setSelectedStudentId(filtered[0].id)
+                  }}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 focus:outline-none"
+                >
+                  <option value="all">Filter: All Classes</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.code} ({c.schedule_type === 'weekday' ? 'Mon-Fri' : 'Weekend'})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
             <select
               value={selectedStudentId}
               onChange={(e) => setSelectedStudentId(Number(e.target.value))}
               className="w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
             >
               {students.length === 0 && <option value="">No students found. Register in Lecturer View!</option>}
-              {students.map((st) => (
+              {(classFilter === 'all' ? students : students.filter((s) => s.course_id === classFilter)).map((st) => (
                 <option key={st.id} value={st.id}>
-                  {st.student_code} - {st.full_name}
+                  {st.student_code} - {st.full_name}{' '}
+                  {st.course_code
+                    ? `[${st.course_code} • ${st.schedule_type === 'weekday' ? 'Mon-Fri' : 'Weekend'}]`
+                    : ''}
                 </option>
               ))}
             </select>

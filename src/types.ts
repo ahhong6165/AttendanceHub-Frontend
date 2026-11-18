@@ -1,13 +1,29 @@
-export interface Student {
+export interface AdminUser {
   id: number;
-  student_code: string;
-  full_name: string;
+  username: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  username: string;
 }
 
 export interface Course {
   id: number;
   code: string;
   name: string;
+  schedule_type: 'weekday' | 'weekend';
+}
+
+export interface Student {
+  id: number;
+  student_code: string;
+  full_name: string;
+  course_id?: number | null;
+  course_code?: string | null;
+  course_name?: string | null;
+  schedule_type?: 'weekday' | 'weekend' | null;
 }
 
 export interface SessionCreate {
